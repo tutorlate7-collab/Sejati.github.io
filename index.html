@@ -8,7 +8,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
+  <!-- Firebase SDK v8 -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
   <style>
@@ -44,15 +46,26 @@
       }
       body.print-ticket #printArea {
         position: absolute;
-        left: 50%;
+        left: 0;
         top: 0;
-        transform: translateX(-50%);
-        width: 100%;
-        max-width: 350px;
+        width: 100% !important;
+        max-width: 58mm !important; /* Paksa lebar kertas printer thermal 58mm */
+        margin: 0 !important;
+        padding: 5px !important;
         border: none !important;
         box-shadow: none !important;
         background: transparent !important;
+        box-sizing: border-box;
       }
+      /* Penyesuaian ukuran font untuk cetak thermal */
+      body.print-ticket #printArea #ticket-number {
+        font-size: 3rem !important;
+        margin: 0.25rem 0 !important;
+      }
+      body.print-ticket #printArea .ticket-dashed {
+        border-top: 1px dashed #000 !important;
+      }
+      
       body.print-report #reportPrintArea,
       body.print-report #reportPrintArea * {
         visibility: visible;
@@ -65,8 +78,8 @@
         display: block !important;
       }
       @page {
-        size: A4;
-        margin: 1.5cm;
+        size: auto;
+        margin: 0;
       }
     }
   </style>
@@ -91,7 +104,11 @@
 
         <nav class="hidden md:flex space-x-1 bg-gray-100 p-1.5 rounded-xl">
           <button onclick="switchTab('ambil')" id="tab-ambil" class="tab-btn px-4 py-2 text-sm font-semibold rounded-lg bg-white text-red-600 shadow-sm transition">
-            <i class="fa-solid fa-ticket mr-1.5"></i> Ambil Antrean
+            <i class="fa-solid fa-ticket mr-1.5"></i> Ambil Umum
+          </button>
+          <!-- TAMBAHAN: Tab Ambil Cepat untuk Admin -->
+          <button onclick="switchTab('cepat')" id="tab-cepat" class="admin-only tab-btn px-4 py-2 text-sm font-semibold rounded-lg text-gray-600 hover:text-gray-900 transition">
+            <i class="fa-solid fa-bolt mr-1.5"></i> Ambil Cepat
           </button>
           <button onclick="switchTab('monitor')" id="tab-monitor" class="admin-only tab-btn px-4 py-2 text-sm font-semibold rounded-lg text-gray-600 hover:text-gray-900 transition">
             <i class="fa-solid fa-tv mr-1.5"></i> Monitor
@@ -107,12 +124,17 @@
           </button>
         </nav>
 
-        <div class="text-right flex items-center space-x-4">
+        <div class="text-right flex items-center space-x-2 sm:space-x-4">
           <div class="hidden lg:block">
             <p id="live-time" class="text-sm font-bold text-gray-800">Menunggu Waktu...</p>
             <p id="live-clock" class="text-xs text-red-600 font-semibold">--:--:--</p>
           </div>
-          <!-- Tombol Login / Logout -->
+          
+          <button onclick="showPrinterModal()" class="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition flex items-center space-x-1">
+            <i class="fa-solid fa-print"></i>
+            <span class="hidden sm:inline">Printer</span>
+          </button>
+
           <button id="btn-auth-login" onclick="showLoginModal()" class="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-600 text-red-600 hover:bg-red-50 transition">
             <i class="fa-solid fa-lock mr-1"></i> Petugas
           </button>
@@ -124,9 +146,10 @@
     </div>
   </header>
 
-  <!-- Mobile Tabs -->
   <div class="md:hidden bg-white border-b border-red-50 px-4 py-2 flex overflow-x-auto gap-2 scrollbar-none">
-    <button onclick="switchTab('ambil')" id="m-tab-ambil" class="m-tab-btn whitespace-nowrap px-3 py-1.5 text-xs font-bold rounded-lg bg-red-600 text-white">Ambil Antrean</button>
+    <button onclick="switchTab('ambil')" id="m-tab-ambil" class="m-tab-btn whitespace-nowrap px-3 py-1.5 text-xs font-bold rounded-lg bg-red-600 text-white">Ambil Umum</button>
+    <!-- TAMBAHAN: Tab Ambil Cepat untuk Mobile Admin -->
+    <button onclick="switchTab('cepat')" id="m-tab-cepat" class="admin-only m-tab-btn whitespace-nowrap px-3 py-1.5 text-xs font-bold rounded-lg bg-gray-100 text-gray-600">Ambil Cepat</button>
     <button onclick="switchTab('monitor')" id="m-tab-monitor" class="admin-only m-tab-btn whitespace-nowrap px-3 py-1.5 text-xs font-bold rounded-lg bg-gray-100 text-gray-600">Monitor</button>
     <button onclick="switchTab('admin')" id="m-tab-admin" class="admin-only m-tab-btn whitespace-nowrap px-3 py-1.5 text-xs font-bold rounded-lg bg-gray-100 text-gray-600">Loket</button>
     <button onclick="switchTab('rekap')" id="m-tab-rekap" class="admin-only m-tab-btn whitespace-nowrap px-3 py-1.5 text-xs font-bold rounded-lg bg-gray-100 text-gray-600">Laporan</button>
@@ -135,7 +158,6 @@
 
   <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-    <!-- SECTON AMBIL ANTREAN (UMUM) -->
     <section id="section-ambil" class="tab-content block">
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         <div class="lg:col-span-7 bg-white rounded-2xl shadow-xl shadow-gray-100 border border-gray-100 overflow-hidden">
@@ -261,7 +283,60 @@
       </div>
     </section>
 
-    <!-- SECTION MONITOR (ADMIN ONLY) -->
+    <section id="section-cepat" class="tab-content hidden">
+      <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden mb-8">
+        <div class="custom-gradient px-6 py-5 text-white">
+          <h2 class="text-xl font-bold flex items-center"><i class="fa-solid fa-bolt mr-2"></i> Dashboard Ambil Antrean Cepat</h2>
+          <p class="text-xs text-red-100 mt-1">Sistem cetak antrean langsung untuk petugas. Biodata diisi saat pemohon dilayani di loket.</p>
+        </div>
+        <div class="p-8">
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <!-- Buttons Generate Fast -->
+            <button onclick="generateFast('KK')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-users text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Kartu Keluarga</span>
+            </button>
+            <button onclick="generateFast('KTP')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-address-card text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">KTP</span>
+            </button>
+            <button onclick="generateFast('KIA')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-child text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">KIA</span>
+            </button>
+            <button onclick="generateFast('AKL')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-baby text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Akta Kelahiran</span>
+            </button>
+            <button onclick="generateFast('AKM')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-file-signature text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Akta Kematian</span>
+            </button>
+            <button onclick="generateFast('PND')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-truck-moving text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Pindah Datang</span>
+            </button>
+            <button onclick="generateFast('LEG')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-stamp text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Legalisasi Surat</span>
+            </button>
+            <button onclick="generateFast('PRZ')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-file-contract text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Perizinan</span>
+            </button>
+            <button onclick="generateFast('PNG')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-bullhorn text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Pengaduan</span>
+            </button>
+            <button onclick="generateFast('UMM')" class="p-5 bg-white hover:bg-red-50 border-2 border-gray-100 hover:border-red-300 rounded-xl flex flex-col items-center justify-center transition shadow-sm hover:shadow-md">
+              <i class="fa-solid fa-list text-3xl text-red-600 mb-3"></i>
+              <span class="text-sm font-extrabold text-gray-800">Layanan Umum</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="section-monitor" class="tab-content hidden">
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div class="lg:col-span-8 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
@@ -290,14 +365,13 @@
       </div>
     </section>
 
-    <!-- SECTION ADMIN / LOKET (ADMIN ONLY) -->
     <section id="section-admin" class="tab-content hidden">
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div class="lg:col-span-8 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
           <div class="custom-gradient text-white p-6 flex justify-between items-center">
             <div>
               <h2 class="text-xl font-bold flex items-center"><i class="fa-solid fa-user-tie mr-2"></i> Panel Kontrol Loket</h2>
-              <p class="text-xs text-red-100">Kelola antrean masyarakat secara berurutan.</p>
+              <p class="text-xs text-red-100">Kelola antrean dan lengkapi biodata masyarakat.</p>
             </div>
             <div class="flex items-center space-x-2">
               <label class="text-xs font-bold text-white hidden sm:inline">Loket Aktif:</label>
@@ -310,7 +384,7 @@
           </div>
 
           <div class="p-6">
-            <div class="bg-gray-50 rounded-xl p-6 border border-gray-200 text-center mb-6">
+            <div class="bg-gray-50 rounded-xl p-6 border border-gray-200 text-center mb-6 relative">
               <p class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Sedang Diproses di <span id="current-loket-title" class="text-red-600 font-extrabold">Loket 1</span></p>
               <h2 id="admin-current-number" class="text-6xl font-black text-gray-900 my-4">---</h2>
               <div class="flex flex-wrap justify-center gap-2 mb-3">
@@ -337,6 +411,45 @@
                   <span>LEWATI</span>
                 </button>
               </div>
+              
+              <!-- TAMBAHAN: Form Edit Biodata (Ditampilkan saat ada antrean diproses) -->
+              <div id="admin-edit-form" class="mt-6 pt-6 border-t border-gray-200 hidden text-left bg-white p-5 rounded-xl shadow-sm border">
+                <h4 class="text-xs font-extrabold text-gray-800 uppercase mb-3 flex items-center"><i class="fa-solid fa-pen-to-square text-red-600 mr-2"></i> Form Kelengkapan Biodata</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label class="block text-[10px] font-bold text-gray-500 mb-1">Nama Pemohon</label>
+                    <input type="text" id="edit-name" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-gray-500 mb-1">No. HP / WA</label>
+                    <input type="tel" id="edit-phone" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-gray-500 mb-1">Desa/Kelurahan</label>
+                    <select id="edit-address" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none">
+                        <option value="" disabled selected>Pilih Desa</option>
+                        <option value="Jatiroto">Jatiroto</option>
+                        <option value="Kaliboto Lor">Kaliboto Lor</option>
+                        <option value="Kaliboto Kidul">Kaliboto Kidul</option>
+                        <option value="Rojopolo">Rojopolo</option>
+                        <option value="Sukosari">Sukosari</option>
+                        <option value="Banyuputih Kidul">Banyuputih Kidul</option>
+                    </select>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label class="block text-[10px] font-bold text-gray-500 mb-1">RT</label>
+                      <input type="number" id="edit-rt" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none">
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-bold text-gray-500 mb-1">RW</label>
+                      <input type="number" id="edit-rw" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none">
+                    </div>
+                  </div>
+                </div>
+                <button onclick="saveBioDataAdmin()" class="w-full py-2.5 bg-gray-800 text-white text-xs font-bold rounded-lg hover:bg-gray-900 transition shadow">Simpan / Perbarui Biodata</button>
+              </div>
+
             </div>
 
             <h3 class="text-sm font-extrabold text-gray-700 uppercase tracking-wider mb-3">Daftar Antrean Menunggu</h3>
@@ -392,7 +505,6 @@
       </div>
     </section>
 
-    <!-- SECTION REKAP (ADMIN ONLY) -->
     <section id="section-rekap" class="tab-content hidden">
       <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
@@ -444,9 +556,7 @@
       </div>
     </section>
     
-    <!-- SECTION CLOUD (ADMIN ONLY) -->
     <section id="section-panduan" class="tab-content hidden">
-        <!-- Kode cloud tetap sama, dihilangkan untuk menghemat baris agar fokus ke perbaikan -->
         <div class="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden max-w-4xl mx-auto">
           <div class="custom-gradient text-white p-6">
             <h2 class="text-xl font-bold flex items-center"><i class="fa-solid fa-code mr-2"></i> Integrasi Cloud Backup</h2>
@@ -479,14 +589,14 @@
       
       <form onsubmit="doLogin(event)" class="space-y-4">
         <div>
-          <label class="block text-xs font-bold text-gray-700 mb-1">Username</label>
-          <input type="text" id="login-user" class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none" placeholder="Masukkan username">
+          <label class="block text-xs font-bold text-gray-700 mb-1">Email</label>
+          <input type="email" id="login-user" required class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none" placeholder="Masukkan email petugas">
         </div>
         <div>
           <label class="block text-xs font-bold text-gray-700 mb-1">Password</label>
-          <input type="password" id="login-pass" class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none" placeholder="Masukkan password">
+          <input type="password" id="login-pass" required class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none" placeholder="Masukkan password">
         </div>
-        <div id="login-error" class="hidden text-xs text-red-600 font-semibold text-center">Username atau Password salah!</div>
+        <div id="login-error" class="hidden text-xs text-red-600 font-semibold text-center">Autentikasi gagal!</div>
         
         <div class="flex space-x-3 mt-6">
           <button type="button" onclick="hideLoginModal()" class="w-1/2 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-bold rounded-lg transition">Batal</button>
@@ -511,6 +621,56 @@
       <div class="flex space-x-3 justify-end">
         <button onclick="closeResetModal()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-lg transition">Batal</button>
         <button onclick="confirmResetAll()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition shadow-md shadow-red-100">Ya, Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL PENGATURAN PRINTER -->
+  <div id="printerModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden transition-opacity">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-100">
+      <div class="text-center mb-5">
+        <div class="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
+          <i class="fa-solid fa-print text-xl"></i>
+        </div>
+        <h3 class="text-lg font-extrabold text-gray-900">Pengaturan Printer</h3>
+        <p class="text-xs text-gray-500">Sesuaikan metode cetak struk antrean.</p>
+      </div>
+      
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">Metode Cetak</label>
+          <select id="print-method-select" onchange="changePrintMethod()" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none">
+            <option value="system">Dialog Print Sistem (Default / Browser)</option>
+            <option value="rawbt">Aplikasi RawBT (Sangat Direkomendasikan di APK)</option>
+            <option value="bluetooth">Koneksi Bluetooth Langsung (Web Bluetooth)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">Lebar Kertas</label>
+          <select id="paper-size-select" onchange="changePaperSize()" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 outline-none">
+            <option value="58">Printer Thermal 58mm</option>
+            <option value="80">Printer Thermal 80mm</option>
+          </select>
+        </div>
+
+        <div id="bluetooth-connect-panel" class="hidden p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <p class="text-[11px] font-semibold text-gray-600">Koneksi Web Bluetooth:</p>
+          <div id="printer-status" class="text-xs text-gray-400 mt-1 italic">Status: Belum Terhubung</div>
+          <button onclick="connectBluetoothPrinter()" class="w-full mt-2 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-md transition shadow flex items-center justify-center space-x-1">
+            <i class="fa-solid fa-wifi"></i>
+            <span>Hubungkan Printer Bluetooth</span>
+          </button>
+        </div>
+
+        <button onclick="testPrint()" class="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-lg transition border border-gray-300 flex items-center justify-center space-x-1">
+          <i class="fa-solid fa-vial"></i>
+          <span>Cetak Uji Coba (Test Print)</span>
+        </button>
+        
+        <div class="flex space-x-2 mt-5 pt-3 border-t border-gray-100">
+          <button onclick="hidePrinterModal()" class="w-full py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg transition text-center">Selesai</button>
+        </div>
       </div>
     </div>
   </div>
@@ -548,7 +708,7 @@
   </div>
 
   <script>
-    // 1. KONFIGURASI FIREBASE (Pertahankan kode asli)
+    // 1. KONFIGURASI FIREBASE
     const firebaseConfig = {
       apiKey: "AIzaSyDqvJrraYWIUS5whpHEN2ynQVKyGAr0QFw",
       authDomain: "sejatijtr.firebaseapp.com",
@@ -560,17 +720,14 @@
     };
 
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth(); 
     const database = firebase.database();
     const dbRef = database.ref('sejati_queue_v1');
 
-    // SISTEM LOGIN SEDERHANA
-    const ADMIN_USER = "admin";
-    const ADMIN_PASS = "rahasia123";
     let isAdmin = false;
 
-    function checkAuth() {
-      const authStatus = sessionStorage.getItem('sejati_admin_auth');
-      if (authStatus === 'true') {
+    auth.onAuthStateChanged((user) => {
+      if (user) {
         isAdmin = true;
         document.getElementById('app-body').classList.add('is-admin');
         document.getElementById('btn-auth-login').classList.add('hidden');
@@ -580,8 +737,13 @@
         document.getElementById('app-body').classList.remove('is-admin');
         document.getElementById('btn-auth-login').classList.remove('hidden');
         document.getElementById('btn-auth-logout').classList.add('hidden');
+        
+        const activeTab = document.querySelector('.tab-content.block');
+        if (activeTab && activeTab.id !== 'section-ambil') {
+          switchTab('ambil'); 
+        }
       }
-    }
+    });
 
     function showLoginModal() { document.getElementById('loginModal').classList.remove('hidden'); }
     function hideLoginModal() { 
@@ -591,34 +753,33 @@
     
     function doLogin(e) {
       e.preventDefault();
-      const u = document.getElementById('login-user').value;
-      const p = document.getElementById('login-pass').value;
+      const email = document.getElementById('login-user').value;
+      const pass = document.getElementById('login-pass').value;
 
-      if (u === ADMIN_USER && p === ADMIN_PASS) {
-        sessionStorage.setItem('sejati_admin_auth', 'true');
-        checkAuth();
-        hideLoginModal();
-        document.getElementById('login-user').value = '';
-        document.getElementById('login-pass').value = '';
-        showToast('Login berhasil, akses petugas dibuka.');
-      } else {
-        document.getElementById('login-error').classList.remove('hidden');
-      }
+      auth.signInWithEmailAndPassword(email, pass)
+        .then((userCredential) => {
+          hideLoginModal();
+          document.getElementById('login-user').value = '';
+          document.getElementById('login-pass').value = '';
+          showToast('Login berhasil, akses petugas dibuka.');
+        })
+        .catch((error) => {
+          document.getElementById('login-error').innerText = 'Email atau Password salah!';
+          document.getElementById('login-error').classList.remove('hidden');
+        });
     }
 
     function doLogout() {
-      sessionStorage.removeItem('sejati_admin_auth');
-      checkAuth();
-      switchTab('ambil'); // Lempar kembali ke tab publik jika logout
-      showToast('Anda telah keluar.');
+      auth.signOut().then(() => {
+        showToast('Anda telah keluar.');
+      }).catch((error) => {
+        showToast('Gagal logout: ' + error.message);
+      });
     }
 
-    // STATE UTAMA APP
     let queueDatabase = [];
-    // Ditambahkan AKM, AKL, PND ke struktur data
     let currentCounters = { KK: 0, KTP: 0, KIA: 0, AKM: 0, AKL: 0, PND: 0, LEG: 0, PRZ: 0, PNG: 0, UMM: 0 };
     let loketList = {
-      // Loket 1 menangani seluruh urusan Kependudukan
       'Loket 1': { name: 'Loket 1 (Kependudukan Lengkap)', current: null, allowed: ['KK', 'KTP', 'KIA', 'AKL', 'AKM', 'PND'] },
       'Loket 2': { name: 'Loket 2 (Legalisasi & Izin)', current: null, allowed: ['LEG', 'PRZ'] },
       'Loket 3': { name: 'Loket 3 (Layanan Umum & Pengaduan)', current: null, allowed: ['UMM', 'PNG'] }
@@ -626,8 +787,12 @@
     let selectedLoket = 'Loket 1';
     let myChartInstance = null;
 
+    let printMethod = localStorage.getItem('sejati_print_method') || 'system';
+    let paperSize = localStorage.getItem('sejati_paper_size') || '58';
+    let printerDevice = null;
+    let printerCharacteristic = null;
+
     window.onload = function() {
-      checkAuth(); // Cek login saat refresh
       dbRef.on('value', (snapshot) => {
         const parsed = snapshot.val();
         if (parsed) {
@@ -645,6 +810,10 @@
         updateAllViews();
       });
       startClock();
+      
+      document.getElementById('print-method-select').value = printMethod;
+      document.getElementById('paper-size-select').value = paperSize;
+      toggleBluetoothPanel();
     };
 
     function saveToStorage() {
@@ -672,7 +841,6 @@
     }
 
     function switchTab(tabId) {
-      // Keamanan Tambahan: Jika tab bukan 'ambil' dan user belum login, paksa login.
       if (tabId !== 'ambil' && !isAdmin) {
         showLoginModal();
         return;
@@ -702,6 +870,7 @@
       if (tabId === 'rekap') renderCharts();
     }
 
+    // Fungsi Original untuk Ambil Mandiri
     function generateQueue(event) {
       event.preventDefault();
       const name = document.getElementById('applicantName').value.trim();
@@ -711,6 +880,17 @@
       const rw = document.getElementById('applicantRW').value || '0';
       const serviceType = document.getElementById('serviceTypeSelect').value;
 
+      processQueueCreation(serviceType, name, phone, address, rt, rw);
+      document.getElementById('queueForm').reset();
+    }
+
+    // TAMBAHAN: Fungsi Baru untuk Ambil Cepat
+    function generateFast(serviceType) {
+      processQueueCreation(serviceType, 'Diisi Petugas', '-', '-', '0', '0');
+    }
+
+    // Helper untuk memproses pembuatan antrean (Dipakai Umum & Cepat)
+    function processQueueCreation(serviceType, name, phone, address, rt, rw) {
       currentCounters[serviceType]++;
       const queueNumber = `${serviceType}-${String(currentCounters[serviceType]).padStart(3, '0')}`;
       const timestamp = new Date();
@@ -730,15 +910,22 @@
       document.getElementById('ticket-number').innerText = queueNumber;
       document.getElementById('ticket-service-name').innerText = getServiceLabel(serviceType);
       document.getElementById('ticket-applicant').innerText = name;
-      document.getElementById('ticket-address').innerText = `${address}`;
+      document.getElementById('ticket-address').innerText = address;
       
       const printBtn = document.getElementById('print-btn');
       printBtn.removeAttribute('disabled');
       printBtn.classList.replace('bg-gray-200', 'custom-gradient');
       printBtn.classList.replace('text-gray-400', 'text-white');
 
-      document.getElementById('queueForm').reset();
       showToast(`Antrean ${queueNumber} berhasil dibuat!`);
+
+      // Cetak Otomatis jika printer bluetooth terhubung atau menggunakan RawBT, atau jika dari Ambil Cepat
+      if (printMethod !== 'system') {
+        setTimeout(() => { printTicket(); }, 800);
+      } else if (name === 'Diisi Petugas') {
+        // Jika dari ambil cepat, tapi metode system, kita paksa panggil print
+        setTimeout(() => { printTicket(); }, 500);
+      }
     }
 
     function showToast(msg) {
@@ -770,7 +957,7 @@
         updateAdminPanel();
         updateStatistics();
       }
-      updateMonitorView(); // Monitor bisa berjalan walau di background
+      updateMonitorView(); 
     }
 
     function updateMonitorView() {
@@ -813,9 +1000,30 @@
     function updateAdminPanel() {
       const l = loketList[selectedLoket];
       const q = l.current;
+      
       document.getElementById('admin-current-number').innerText = q ? q.queueNumber : '---';
       document.getElementById('admin-current-name').innerText = q ? q.name : '-';
       document.getElementById('admin-current-service').innerText = q ? getServiceLabel(q.serviceType) : '-';
+      document.getElementById('admin-current-address').innerText = q ? q.address : '-';
+
+      // Mengatur tampilan Form Edit Biodata
+      const editForm = document.getElementById('admin-edit-form');
+      if (q) {
+        editForm.classList.remove('hidden');
+        document.getElementById('edit-name').value = q.name === 'Diisi Petugas' ? '' : q.name;
+        document.getElementById('edit-phone').value = q.phone === '-' ? '' : q.phone;
+        document.getElementById('edit-address').value = q.address === '-' ? '' : q.address;
+        
+        let rtVal = '', rwVal = '';
+        if(q.rtrw && q.rtrw !== '-') {
+           const match = q.rtrw.match(/RT (\d+) \/ RW (\d+)/);
+           if(match) { rtVal = match[1]; rwVal = match[2]; }
+        }
+        document.getElementById('edit-rt').value = rtVal;
+        document.getElementById('edit-rw').value = rwVal;
+      } else {
+        editForm.classList.add('hidden');
+      }
 
       const tb = document.getElementById('admin-queue-table');
       tb.innerHTML = '';
@@ -837,6 +1045,25 @@
         
         tb.innerHTML += `<tr><td class="px-4 py-3 font-bold text-red-600 align-top">${i.queueNumber}${statusBadge}</td><td class="px-4 py-3 align-top">${i.name}</td><td class="px-4 py-3 text-gray-500 align-top">${i.address}</td><td class="px-4 py-3 text-gray-500 align-top">${getServiceLabel(i.serviceType)}</td><td class="px-4 py-3 text-center align-top">${btn}</td></tr>`;
       });
+    }
+
+    // TAMBAHAN: Fungsi Menyimpan Biodata dari Form Admin
+    function saveBioDataAdmin() {
+      const l = loketList[selectedLoket];
+      if (!l.current) return;
+      const t = queueDatabase.find(x => x.id === l.current.id);
+      if (t) {
+        t.name = document.getElementById('edit-name').value.trim() || 'Diisi Petugas';
+        t.phone = document.getElementById('edit-phone').value.trim() || '-';
+        t.address = document.getElementById('edit-address').value || '-';
+        const rt = document.getElementById('edit-rt').value || '0';
+        const rw = document.getElementById('edit-rw').value || '0';
+        t.rtrw = `RT ${rt} / RW ${rw}`;
+        
+        saveToStorage();
+        showToast('Biodata pemohon berhasil diperbarui.');
+        updateAllViews();
+      }
     }
 
     function panggilKeLoket(id) {
@@ -878,7 +1105,14 @@
       const l = loketList[selectedLoket];
       if(!l.current) return;
       const t = queueDatabase.find(x => x.id === l.current.id);
-      if(t) { t.status = 'Selesai'; t.completedTime = new Date().toLocaleTimeString('id-ID'); }
+      if(t) { 
+        if (t.name === 'Diisi Petugas') {
+            showToast('Mohon lengkapi dan simpan biodata terlebih dahulu.');
+            return;
+        }
+        t.status = 'Selesai'; 
+        t.completedTime = new Date().toLocaleTimeString('id-ID'); 
+      }
       l.current = null; saveToStorage();
     }
     
@@ -925,7 +1159,6 @@
       });
     }
 
-    function printTicket() { document.body.className = 'print-ticket'; window.print(); setTimeout(() => document.body.className = '', 500); }
     function printReport() { 
       const b = document.getElementById('print-report-table-body'); b.innerHTML = '';
       queueDatabase.forEach(q => {
@@ -945,6 +1178,262 @@
         `;
       });
       document.body.className = 'print-report'; window.print(); setTimeout(() => document.body.className = '', 500);
+    }
+    
+    function showPrinterModal() {
+      document.getElementById('printerModal').classList.remove('hidden');
+    }
+
+    function hidePrinterModal() {
+      document.getElementById('printerModal').classList.add('hidden');
+    }
+
+    function toggleBluetoothPanel() {
+      const panel = document.getElementById('bluetooth-connect-panel');
+      if (printMethod === 'bluetooth') {
+        panel.classList.remove('hidden');
+      } else {
+        panel.classList.add('hidden');
+      }
+    }
+
+    function changePrintMethod() {
+      printMethod = document.getElementById('print-method-select').value;
+      localStorage.setItem('sejati_print_method', printMethod);
+      toggleBluetoothPanel();
+      showToast(`Metode cetak diubah ke: ${printMethod.toUpperCase()}`);
+    }
+
+    function changePaperSize() {
+      paperSize = document.getElementById('paper-size-select').value;
+      localStorage.setItem('sejati_paper_size', paperSize);
+      showToast(`Ukuran kertas diatur ke: ${paperSize}mm`);
+    }
+
+    async function connectBluetoothPrinter() {
+      if (!navigator.bluetooth) {
+        showToast("Peramban / WebView ini tidak mendukung Web Bluetooth.");
+        return;
+      }
+      try {
+        showToast("Mencari printer bluetooth...");
+        printerDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [
+            '000018f0-0000-1000-8000-00805f9b34fb', // Standard thermal printer service
+            '00001101-0000-1000-8000-00805f9b34fb', // Serial SPP
+            'e7810a71-73ae-499d-8c15-faa9ae90611a'
+          ]
+        });
+
+        document.getElementById('printer-status').innerText = `Menghubungkan ke ${printerDevice.name}...`;
+        const server = await printerDevice.gatt.connect();
+        
+        let service;
+        const knownServices = ['000018f0-0000-1000-8000-00805f9b34fb', '00001101-0000-1000-8000-00805f9b34fb', 'e7810a71-73ae-499d-8c15-faa9ae90611a'];
+        for (let uuid of knownServices) {
+          try {
+            service = await server.getPrimaryService(uuid);
+            if (service) break;
+          } catch(e) {}
+        }
+
+        if (!service) {
+          throw new Error("Layanan GATT Printer tidak terdeteksi!");
+        }
+
+        const characteristics = await service.getCharacteristics();
+        printerCharacteristic = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
+
+        if (!printerCharacteristic) {
+          throw new Error("Karakteristik Write tidak ditemukan pada printer.");
+        }
+
+        document.getElementById('printer-status').innerText = `Terhubung ke: ${printerDevice.name}`;
+        document.getElementById('printer-status').className = "text-xs text-green-600 font-bold mt-2";
+        showToast("Printer Bluetooth berhasil terhubung!");
+      } catch (err) {
+        console.error(err);
+        document.getElementById('printer-status').innerText = `Koneksi gagal!`;
+        document.getElementById('printer-status').className = "text-xs text-red-600 font-bold mt-2";
+        showToast("Gagal terhubung: " + err.message);
+      }
+    }
+
+    async function sendBytesToPrinter(bytes) {
+      if (!printerCharacteristic) {
+        showToast("Hubungkan ke printer Bluetooth terlebih dahulu!");
+        return;
+      }
+      const chunkSize = 20;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.slice(i, i + chunkSize);
+        await printerCharacteristic.writeValue(chunk);
+      }
+    }
+
+    function buildEscPosBytes(q) {
+      const encoder = new TextEncoder();
+      
+      const ESC = 0x1B;
+      const GS = 0x1D;
+      
+      const init = [ESC, 0x40]; 
+      const center = [ESC, 0x61, 0x01]; 
+      const left = [ESC, 0x61, 0x00]; 
+      const boldOn = [ESC, 0x45, 0x01]; 
+      const boldOff = [ESC, 0x45, 0x00]; 
+      
+      const sizeLarge = [GS, 0x21, 0x11]; 
+      const sizeNormal = [GS, 0x21, 0x00];
+      
+      const feedPaper = [ESC, 0x64, 0x04]; 
+      const cutPaper = [GS, 0x56, 0x41, 0x03]; 
+
+      let bytes = [];
+      const append = (arr) => bytes.push(...arr);
+      const appendStr = (str) => bytes.push(...encoder.encode(str + "\n"));
+
+      append(init);
+      append(center);
+      append(boldOn);
+      appendStr("PEMERINTAH KAB. LUMAJANG");
+      appendStr("KECAMATAN JATIROTO");
+      append(boldOff);
+      appendStr("Jln Gajah Mada No 02 Jatiroto");
+      appendStr("--------------------------------");
+      appendStr("");
+      appendStr("NOMOR ANTREAN ANDA:");
+      append(sizeLarge);
+      append(boldOn);
+      appendStr(q.queueNumber);
+      append(sizeNormal);
+      append(boldOff);
+      appendStr("");
+      append(boldOn);
+      appendStr(getServiceLabel(q.serviceType).toUpperCase());
+      append(boldOff);
+      appendStr("--------------------------------");
+      append(left);
+      appendStr(`Nama    : ${q.name}`);
+      appendStr(`Alamat  : ${q.address}`);
+      appendStr(`Waktu   : ${q.time}`);
+      appendStr(`Tanggal : ${q.date}`);
+      appendStr("--------------------------------");
+      append(center);
+      appendStr("Mohon menunggu hingga dipanggil.");
+      appendStr("Terima kasih.");
+      appendStr("");
+      append(feedPaper);
+      append(cutPaper);
+
+      return new Uint8Array(bytes);
+    }
+
+    function printViaRawBT(q) {
+      const text = `
+[C]<b>PEMERINTAH KAB. LUMAJANG</b>
+[C]<b>KECAMATAN JATIROTO</b>
+[C]Jln Gajah Mada No 02 Jatiroto
+[C]--------------------------------
+[C]NOMOR ANTREAN ANDA:
+[C]<font size="big"><b>${q.queueNumber}</b></font>
+
+[C]<b>${getServiceLabel(q.serviceType).toUpperCase()}</b>
+[C]--------------------------------
+[L]Nama    : ${q.name}
+[L]Alamat  : ${q.address}
+[L]Waktu   : ${q.time}
+[L]Tanggal : ${q.date}
+[C]--------------------------------
+[C]Mohon menunggu hingga dipanggil.
+[C]Terima kasih.
+
+
+`;
+      const url = `intent:#Intent;scheme=rawbt;package=ru.a2011.btrprint;S.text=${encodeURIComponent(text)};end;`;
+      window.location.href = url;
+    }
+
+    function printTicket() {
+      const queueNumber = document.getElementById('ticket-number').innerText;
+      if (queueNumber === '---') {
+        showToast("Silakan ambil antrean terlebih dahulu.");
+        return;
+      }
+
+      const q = queueDatabase.find(item => item.queueNumber === queueNumber);
+      if (!q) {
+        showToast("Data antrean tidak ditemukan.");
+        return;
+      }
+
+      if (printMethod === 'bluetooth') {
+        if (!printerCharacteristic) {
+          showToast("Printer Bluetooth belum tersambung. Mencoba print via sistem...");
+          printViaSystem();
+          return;
+        }
+        const bytes = buildEscPosBytes(q);
+        sendBytesToPrinter(bytes)
+          .then(() => showToast("Mencetak tiket via Bluetooth..."))
+          .catch(err => {
+            console.error(err);
+            showToast("Koneksi terputus. Mencoba cetak lewat sistem.");
+            printViaSystem();
+          });
+      } else if (printMethod === 'rawbt') {
+        printViaRawBT(q);
+      } else {
+        printViaSystem();
+      }
+    }
+
+    function printViaSystem() {
+      document.body.className = 'print-ticket';
+      window.print();
+      setTimeout(() => { document.body.className = ''; }, 500);
+    }
+
+    function testPrint() {
+      const testData = {
+        queueNumber: "X-999",
+        name: "UJI COBA PRINTER",
+        address: "Jatiroto, Lumajang",
+        time: new Date().toLocaleTimeString('id-ID'),
+        date: new Date().toLocaleDateString('id-ID'),
+        serviceType: "UMM"
+      };
+
+      if (printMethod === 'bluetooth') {
+        if (!printerCharacteristic) {
+          showToast("Printer Bluetooth tidak aktif / terhubung!");
+          return;
+        }
+        const bytes = buildEscPosBytes(testData);
+        sendBytesToPrinter(bytes).then(() => showToast("Test print dikirim!"));
+      } else if (printMethod === 'rawbt') {
+        printViaRawBT(testData);
+      } else {
+        const oldNum = document.getElementById('ticket-number').innerText;
+        const oldSrv = document.getElementById('ticket-service-name').innerText;
+        const oldApp = document.getElementById('ticket-applicant').innerText;
+        const oldAdr = document.getElementById('ticket-address').innerText;
+        
+        document.getElementById('ticket-number').innerText = "X-999";
+        document.getElementById('ticket-service-name').innerText = "TEST CETAK PRINTER";
+        document.getElementById('ticket-applicant').innerText = "PENGUJIAN SISTEM";
+        document.getElementById('ticket-address').innerText = "Jatiroto";
+        
+        printViaSystem();
+        
+        setTimeout(() => {
+          document.getElementById('ticket-number').innerText = oldNum;
+          document.getElementById('ticket-service-name').innerText = oldSrv;
+          document.getElementById('ticket-applicant').innerText = oldApp;
+          document.getElementById('ticket-address').innerText = oldAdr;
+        }, 1000);
+      }
     }
   </script>
 </body>
